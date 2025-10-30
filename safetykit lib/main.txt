@@ -1,0 +1,847 @@
+// safetykit_frontend_main.dart
+// A self-contained Flutter UI scaffold for SafetyKit (frontend-only).
+// Drop this into lib/main.dart of your existing `safetykit` Flutter project.
+// This file intentionally uses NO external packages so it compiles cleanly.
+
+import 'dart:async';
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const SafetyKitMain());
+}
+
+class SafetyKitMain extends StatelessWidget {
+  const SafetyKitMain({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'SafetyKit (UI)',
+      theme: ThemeData(primarySwatch: Colors.red),
+      home: const SafetyKitApp(),
+    );
+  }
+}
+
+// -------------------------
+// Simple in-memory services
+// -------------------------
+
+class Incident {
+  final String id;
+  final String phone;
+  final double? lat;
+  final double? lng;
+  final DateTime timestamp;
+
+  Incident({
+    required this.id,
+    required this.phone,
+    this.lat,
+    this.lng,
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
+}
+
+class IncidentService {
+  IncidentService._internal();
+  static final IncidentService instance = IncidentService._internal();
+
+  final List<Incident> _incidents = [];
+  final StreamController<List<Incident>> _controller = StreamController.broadcast();
+
+  Stream<List<Incident>> get stream => _controller.stream;
+
+  void addIncident(Incident inc) {
+    _incidents.insert(0, inc);
+    _controller.add(List.unmodifiable(_incidents));
+  }
+
+  List<Incident> get current => List.unmodifiable(_incidents);
+}
+
+class BluetoothService {
+  BluetoothService._internal();
+  static final BluetoothService instance = BluetoothService._internal();
+
+  final ValueNotifier<String?> connectedDevice = ValueNotifier<String?>(null);
+}
+
+// -------------------------
+// App
+// -------------------------
+
+class SafetyKitApp extends StatefulWidget {
+  const SafetyKitApp({super.key});
+
+  @override
+  State<SafetyKitApp> createState() => _SafetyKitAppState();
+}
+
+class _SafetyKitAppState extends State<SafetyKitApp> {
+  int _selectedIndex = 0;
+
+  final _pages = const [
+    HomeScreen(),
+    ContactsScreen(),
+    LogsScreen(),
+    SettingsScreen(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(child: _pages[_selectedIndex]),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: (index) => setState(() => _selectedIndex = index),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+          BottomNavigationBarItem(icon: Icon(Icons.contacts), label: 'Contacts'),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Logs'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+        ],
+      ),
+    );
+  }
+}
+
+// -------------------------
+// Home Screen
+// -------------------------
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  void _simulateSOS(BuildContext context) {
+    final id = DateTime.now().millisecondsSinceEpoch.toString();
+    final inc = Incident(id: id, phone: '+91-unknown', lat: null, lng: null);
+    IncidentService.instance.addIncident(inc);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('🚨 SOS Triggered! (local demo)')),
+    );
+
+    // In a real app: call the function that sends SMS/Push/Firestore entry here.
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const SizedBox(height: 20),
+        const Center(
+          child: Text('SafetyKit', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: 16),
+
+        // status row
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: ValueListenableBuilder<String?>(
+            valueListenable: BluetoothService.instance.connectedDevice,
+            builder: (context, val, _) {
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.bluetooth),
+                      const SizedBox(width: 8),
+                      Text(val == null ? 'Not connected' : 'Connected: $val'),
+                    ],
+                  ),
+                  StreamBuilder<List<Incident>>(
+                    stream: IncidentService.instance.stream,
+                    builder: (context, snap) {
+                      if (!snap.hasData || snap.data!.isEmpty) return const Text('No SOS yet');
+                      final latest = snap.data!.first;
+                      return Text('Last SOS: ${_formatDate(latest.timestamp)}');
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+
+        const SizedBox(height: 24),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            padding: const EdgeInsets.all(40),
+            shape: const CircleBorder(),
+          ),
+          onPressed: () => _simulateSOS(context),
+          child: const Text('SOS', style: TextStyle(fontSize: 32, color: Colors.white)),
+        ),
+        const SizedBox(height: 20),
+        const Text('Tap the button or press your wearable trigger.'),
+      ],
+    );
+  }
+}
+
+// -------------------------
+// Contacts Screen (local demo)
+// -------------------------
+
+class ContactsScreen extends StatefulWidget {
+  const ContactsScreen({super.key});
+
+  @override
+  State<ContactsScreen> createState() => _ContactsScreenState();
+}
+
+class _ContactsScreenState extends State<ContactsScreen> {
+  final _contacts = <String>["+919876543210"];
+  final _controller = TextEditingController();
+
+  void _addContact() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _contacts.add(text));
+    _controller.clear();
+  }
+
+  void _removeContact(int index) {
+    setState(() => _contacts.removeAt(index));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Emergency Contacts')),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              itemCount: _contacts.length,
+              itemBuilder: (context, index) => ListTile(
+                leading: const Icon(Icons.phone),
+                title: Text(_contacts[index]),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.grey),
+                  onPressed: () => _removeContact(index),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Add Contact',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.add_circle, color: Colors.green),
+                  onPressed: _addContact,
+                  iconSize: 36,
+                )
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+// -------------------------
+// Logs Screen (uses the in-memory stream)
+// -------------------------
+
+class LogsScreen extends StatelessWidget {
+  const LogsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('SOS Logs')),
+      body: StreamBuilder<List<Incident>>(
+        stream: IncidentService.instance.stream,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('No incidents yet'));
+          }
+          final docs = snapshot.data!;
+          return ListView.builder(
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final d = docs[index];
+              return ListTile(
+                leading: const Icon(Icons.warning, color: Colors.red),
+                title: Text('SOS — ${d.phone}'),
+                subtitle: Text('At ${_formatDate(d.timestamp)}\nLat: ${d.lat ?? '-'}  Lng: ${d.lng ?? '-'}'),
+                isThreeLine: true,
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+// -------------------------
+// Settings Screen (Bluetooth placeholder + links)
+// -------------------------
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  void _showBluetoothDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Connect to HC-05'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('This is a UI demo. To enable real Bluetooth, add a Bluetooth package.'),
+              const SizedBox(height: 12),
+              const Text('Mock paired devices:'),
+              ListTile(
+                leading: const Icon(Icons.bluetooth),
+                title: const Text('HC-05 (00:11:22:33:44:55)'),
+                trailing: ElevatedButton(
+                  onPressed: () {
+                    BluetoothService.instance.connectedDevice.value = 'HC-05';
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connected to HC-05 (mock)')));
+                  },
+                  child: const Text('Connect'),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.bluetooth),
+            title: const Text('Connect to HC-05'),
+            subtitle: const Text('Pair your wearable (mock UI)'),
+            onTap: () => _showBluetoothDialog(context),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.map),
+            title: const Text('Show Map'),
+            subtitle: const Text('Optional — add google_maps_flutter to see user location'),
+            onTap: () => showDialog(context: context, builder: (_) => const AlertDialog(content: Text('Map placeholder — add Google Maps plugin for real map.'))),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.security),
+            title: const Text('Privacy & Permissions'),
+            subtitle: const Text('Grant Bluetooth/location permissions when integrating'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// -------------------------
+// Utilities
+// -------------------------
+
+String _formatDate(DateTime dt) {
+  final y = dt.year.toString().padLeft(4, '0');
+  final m = dt.month.toString().padLeft(2, '0');
+  final d = dt.day.toString().padLeft(2, '0');
+  final hh = dt.hour.toString().padLeft(2, '0');
+  final mm = dt.minute.toString().padLeft(2, '0');
+  final ss = dt.second.toString().padLeft(2, '0');
+  return '$y-$m-$d $hh:$mm:$ss';
+}
+
+/*
+  NOTES & NEXT STEPS
+
+  1) Replace in-memory services with Firestore:
+     - Add firebase_core & cloud_firestore to pubspec.yaml
+     - Run `flutterfire configure` (or manually add google-services files)
+     - Initialize Firebase in main() and replace IncidentService stream with
+       a StreamBuilder on FirebaseFirestore.instance.collection('incidents').orderBy('timestamp', descending: true).snapshots()
+
+  2) Bluetooth integration (HC-05):
+     - Recommended packages: flutter_bluetooth_serial (classic BT) or flutter_blue (BLE).
+     - Android permissions (AndroidManifest.xml):
+         <uses-permission android:name="android.permission.BLUETOOTH" />
+         <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+         <!-- For Android 12+ -->
+         <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+         <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+         <!-- If you need location-based scanning/legacy support -->
+         <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+     - Pairing: typically done via system Settings (PIN 1234). Then connect programmatically by device address.
+
+  3) Maps: add google_maps_flutter and obtain an API key; add <meta-data android:name="com.google.android.geo.API_KEY" android:value="YOUR_KEY"/>
+
+  4) Persisting contacts: use cloud_firestore or shared_preferences / sqflite depending on desired behavior.
+
+  5) Testing: run on a real device for Bluetooth & Maps. Use emulator for UI-only testing.
+
+*/             
+
+
+
+
+
+
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+i have a folder named safetykit lib. this folder has a lib folder and  and pubspec file. The lib folder has models, screens, services, ui, utils folders . it also has a firebase_options file and main file. the models folder has a incident file. the screens folder has bluetooth_screen, contacts_screen, home_screen, logs_screen, settings_screen. the services folder has incidents_services. make at tree of this .
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------   
+
+
+
+
+## **1️⃣ lib/models/incident.dart**
+
+```dart
+class Incident {
+  final String? id;
+  final String phone;
+  final double lat;
+  final double lng;
+  final DateTime timestamp;
+
+  Incident({
+    this.id,
+    required this.phone,
+    required this.lat,
+    required this.lng,
+    required this.timestamp,
+  });
+}
+```
+
+---
+
+## **2️⃣ lib/services/incidents_service.dart**
+
+```dart
+import 'dart:async';
+import 'dart:math';
+import '../models/incident.dart';
+
+class IncidentsService {
+  IncidentsService._();
+  static final instance = IncidentsService._();
+
+  final _controller = StreamController<List<Incident>>.broadcast();
+  final List<Incident> _items = [];
+
+  Stream<List<Incident>> get stream => _controller.stream;
+
+  void add(Incident i) {
+    _items.insert(0, i);
+    _controller.add(List.unmodifiable(_items));
+  }
+
+  void simulateSOS() {
+    final r = Random();
+    final lat = 12.9716 + r.nextDouble() * 0.01;
+    final lng = 77.5946 + r.nextDouble() * 0.01;
+    add(Incident(
+      phone: "+919876543210",
+      lat: double.parse(lat.toStringAsFixed(5)),
+      lng: double.parse(lng.toStringAsFixed(5)),
+      timestamp: DateTime.now(),
+    ));
+  }
+}
+```
+
+---
+
+## **3️⃣ lib/screens/bluetooth_screen.dart**
+
+```dart
+import 'package:flutter/material.dart';
+
+class BluetoothScreen extends StatelessWidget {
+  const BluetoothScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Bluetooth (HC-05)")),
+      body: ListView(
+        children: const [
+          ListTile(
+            leading: Icon(Icons.info_outline),
+            title: Text("Not connected"),
+            subtitle: Text("Tap 'Scan' (below) after we enable Bluetooth plugin."),
+          ),
+          Divider(),
+          ListTile(
+            leading: Icon(Icons.bluetooth_searching),
+            title: Text("Scan for devices"),
+            subtitle: Text("Will show HC-05 here (coming next step)"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+## **4️⃣ lib/screens/contacts_screen.dart**
+
+```dart
+import 'package:flutter/material.dart';
+
+class ContactsScreen extends StatefulWidget {
+  const ContactsScreen({super.key});
+
+  @override
+  State<ContactsScreen> createState() => _ContactsScreenState();
+}
+
+class _ContactsScreenState extends State<ContactsScreen> {
+  final _contacts = <String>["+919876543210"];
+  final _controller = TextEditingController();
+
+  void _addContact() {
+    final v = _controller.text.trim();
+    if (v.isNotEmpty) {
+      setState(() => _contacts.add(v));
+      _controller.clear();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Emergency Contacts")),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.separated(
+              itemCount: _contacts.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, index) => ListTile(
+                leading: const Icon(Icons.phone),
+                title: Text(_contacts[index]),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => setState(() => _contacts.removeAt(index)),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: "Add Contact (phone)",
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _addContact(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.add_circle, color: Colors.green),
+                  onPressed: _addContact,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+## **5️⃣ lib/screens/home_screen.dart**
+
+```dart
+import 'package:flutter/material.dart';
+import '../services/incidents_service.dart';
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  void _simulateSOS(BuildContext context) {
+    IncidentsService.instance.simulateSOS();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("🚨 SOS Triggered! Sending alerts...")),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("SafetyKit")),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              "Tap the SOS button or use your wearable trigger.",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                padding: const EdgeInsets.all(40),
+                shape: const CircleBorder(),
+              ),
+              onPressed: () => _simulateSOS(context),
+              child: const Text(
+                "SOS",
+                style: TextStyle(fontSize: 32, color: Colors.white),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text("Status: Ready"),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## **6️⃣ lib/screens/logs_screen.dart**
+
+```dart
+import 'package:flutter/material.dart';
+import '../models/incident.dart';
+import '../services/incidents_service.dart';
+
+class LogsScreen extends StatelessWidget {
+  const LogsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("SOS Logs")),
+      body: StreamBuilder<List<Incident>>(
+        stream: IncidentsService.instance.stream,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: Text("No incidents yet"));
+          }
+          final items = snapshot.data ?? const <Incident>[];
+          if (items.isEmpty) {
+            return const Center(child: Text("No incidents yet"));
+          }
+          return ListView.separated(
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, i) {
+              final e = items[i];
+              return ListTile(
+                leading: const Icon(Icons.warning, color: Colors.red),
+                title: Text("SOS from ${e.phone}"),
+                subtitle: Text(
+                  "Lat: ${e.lat}, Lng: ${e.lng}\n${e.timestamp.toLocal()}",
+                ),
+                isThreeLine: true,
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+```
+
+---
+
+## **7️⃣ lib/screens/settings_screen.dart**
+
+```dart
+import 'package:flutter/material.dart';
+import 'bluetooth_screen.dart';
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Settings")),
+      body: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.bluetooth),
+            title: const Text("Connect to HC-05"),
+            subtitle: const Text("Pair your wearable"),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BluetoothScreen()),
+            ),
+          ),
+          const Divider(),
+          const ListTile(
+            leading: Icon(Icons.security),
+            title: Text("Privacy & Permissions"),
+            subtitle: Text("Location, Bluetooth, Contacts"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+## **8️⃣ lib/main.dart**
+
+```dart
+import 'package:flutter/material.dart';
+
+// Import your screens
+import 'screens/home_screen.dart';
+import 'screens/contacts_screen.dart';
+import 'screens/logs_screen.dart';
+import 'screens/settings_screen.dart';
+
+void main() {
+  runApp(const SafetyKitAppMain());
+}
+
+class SafetyKitAppMain extends StatelessWidget {
+  const SafetyKitAppMain({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: SafetyKitApp(),
+    );
+  }
+}
+
+class SafetyKitApp extends StatefulWidget {
+  const SafetyKitApp({super.key});
+
+  @override
+  State<SafetyKitApp> createState() => _SafetyKitAppState();
+}
+
+class _SafetyKitAppState extends State<SafetyKitApp> {
+  int _selectedIndex = 0;
+
+  final _pages = const [
+    HomeScreen(),
+    ContactsScreen(),
+    LogsScreen(),
+    SettingsScreen(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _pages[_selectedIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _selectedIndex,
+        onTap: (index) => setState(() => _selectedIndex = index),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
+          BottomNavigationBarItem(icon: Icon(Icons.contacts), label: "Contacts"),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: "Logs"),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: "Settings"),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---------------------------------------------------------------------------------------------
+
+### pubspec.yaml        
+
+
+name: safetykit
+description: A Flutter-based personal safety app without cloud integration
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- Core Flutter packages ---
+  cupertino_icons: ^1.0.6
+
+  # --- Local & device-based features ---
+  http: ^1.2.0                # For local API calls or ESP32 communication
+  shared_preferences: ^2.3.0  # For local storage of user settings, contacts, etc.
+  geolocator: ^13.0.0         # For GPS location tracking
+  flutter_blue_plus: ^1.36.8  # Bluetooth communication
+  vibration: ^3.1.4           # Optional: vibration alerts (updated version)
+
+  # --- UI & state management ---
+  provider: ^6.0.5            # For state management
+  url_launcher: ^6.3.0        # To open dialer, SMS, etc.
+  permission_handler: ^11.4.0 # For location, Bluetooth, etc. permissions
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+
+                                                                         
